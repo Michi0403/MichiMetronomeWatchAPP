@@ -5,7 +5,7 @@
 - Open `MichiMetronome/MichiMetronome.xcodeproj`.
 - Root bundle ID: `com.michi0403.michimetronome`.
 - Watch bundle ID: `com.michi0403.michimetronome.watchkitapp`.
-- Version/build: `1.0.0 (1)`.
+- Version/build: `1.10.2 (2)`.
 - Automatic signing enabled for both generated targets.
 - Team: `YS97976PCZ`.
 - `PrivacyInfo.xcprivacy` visible inside `MichiMetronome Watch App`.

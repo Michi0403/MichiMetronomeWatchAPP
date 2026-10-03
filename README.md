@@ -36,7 +36,7 @@ Both targets use automatic signing with team `YS97976PCZ`.
 Product version:
 
 ```text
-1.0.0 (build 1)
+1.10.2 (build 2)
 ```
 
 Minimum deployment target: watchOS 26.0.
