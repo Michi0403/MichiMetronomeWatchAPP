@@ -1,3 +1,139 @@
+# MichiMetronome 1.10.2 — r14 compile fix
+
+Targeted concurrency compile fix for Xcode 26.6.
+
+The Watch target uses `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, while the
+playback scheduling value type `PlaybackPlan` is explicitly `nonisolated`.
+The pure numeric `MetronomeSettings` constants therefore must not inherit
+MainActor isolation.
+
+The settings limits are now explicitly `nonisolated static let`, including:
+
+- BPM limits
+- manual interval limits
+- base-note limits (C3 / MIDI 48 through C6 / MIDI 84)
+- maximum captured manual events
+
+This fixes the Xcode errors at `MetronomeEngine.swift:1695` and `:1698` without
+moving playback scheduling onto the main actor and without changing musical,
+audio, UI, persistence, signing, version, or build-number behavior.
+
+Validation performed here:
+
+- all Swift files pass syntax parsing
+- `MetronomeSettings.swift` plus a nonisolated access probe type-checks with
+  `-default-isolation MainActor -strict-concurrency=complete`
+
+The local environment still does not contain the Xcode 26.6 watchOS SDK, so a
+real Watch target build remains the final validation.
+
+The separate `MessagesApplicationStub.xcassets` / `Watch6,13` message is not a
+source-code error. For physical-Watch runs, select the `MichiMetronome Watch
+App` scheme. The root `MichiMetronome` scheme is the distribution/archive
+wrapper and should be archived against a generic iOS destination rather than
+run against a physical Watch.
+
+
+---
+
+# MichiMetronome 1.10.1 — r12 compile fix
+
+Targeted source fix only.
+
+`ContentView.swift` used a SwiftUI `frame` overload with:
+
+    .frame(width: 34, minHeight: 32)
+
+SwiftUI has no overload that combines a fixed `width` argument with `minHeight`
+in that form.
+
+It is now expressed as two compatible modifiers:
+
+    .frame(width: 34)
+    .frame(minHeight: 32)
+
+No UI behavior, audio behavior, pitch detection, rhythm presets, settings,
+signing, version/build number, or Xcode project settings were changed.
+
+
+---
+
+# MichiMetronome 1.10.0 — first tester feedback pass
+
+Public version remains 1.0.0. TestFlight build is now 2.
+
+## Main controls
+
+- Start/Stop is larger (50 pt high), uses heavier type, a stronger outline, and explicit START/STOP labels.
+- Tempo Crown editing is transactional. Crown/step changes stay local until Save is tapped.
+- Closing the Tempo sheet with × or Cancel discards changes instead of silently saving them.
+- Tempo editor is scrollable, so Save/Cancel stay reachable on the smaller Apple Watch SE display.
+
+## Accent
+
+- The accent no longer depends on the regular Wood/Sharp/Low/Beep timbre.
+- Default accent sound is a dedicated Harmonic timbre with a stronger transient.
+- Accent sound is configurable: Harmonic, Octave, Bell.
+- “Accent first beat” now drives the actual first BPM beat accent state.
+- Accent preview added to Settings.
+
+## Audio longevity
+
+- The Core Audio scheduling horizon is reduced from 8 seconds to 2 seconds to keep the AVAudioPlayerNode queue shallow on Watch hardware.
+- If watchOS stops the AVAudioEngine render graph while playback is prepared, scheduling now attempts to restart the engine rather than silently dropping every future note.
+
+## Settings
+
+- Removed the explanatory paragraphs from the main Settings list.
+- Output is now focused on Sound, Haptics, Beat sound, Accent, Accent sound and Base note.
+- Tuner is under Tools and notification behavior under App.
+
+## Tuner
+
+- Pitch calculation remains fast internally, but tuner text updates are limited to about 4 Hz (240 ms) for readability.
+- Mic melody recording keeps its faster visual/event path.
+
+## Base note
+
+- Base-note selection is limited to C3…C6 (MIDI 48…84), a practical Watch-speaker range.
+- Existing settings are migrated and clamped into that range.
+
+## Rhythm presets
+
+Added BPM-mode presets:
+
+- Plain
+- Rock
+- Hip-Hop
+- Classical
+- Waltz
+- 6/8 Pulse
+
+Presets can set meter, per-beat accent pattern and per-beat note offsets from the configured base note. The default accent timbre for presets is Harmonic.
+
+## Per-beat editing
+
+The regular BPM screen now displays the note for each beat. Long-press a beat to edit it:
+
+- Accent on/off
+- Use base note or override the note with the Digital Crown
+
+Edits are saved as a Custom rhythm and can be changed while keeping the global BPM workflow.
+
+## Settings migration
+
+Settings schema moves from v6 to v7. Existing v6/v5/v4/v3 settings migrate automatically.
+
+## TestFlight/distribution cleanup
+
+- CURRENT_PROJECT_VERSION: 2
+- Root iOS wrapper deployment target: 15.0 (Watch app remains watchOS 26.0)
+- Root wrapper declares `ITSAppUsesNonExemptEncryption = NO`
+- Added a shared `MichiMetronome` archive scheme so a fresh checkout/ZIP does not require manually creating the root archive scheme again.
+
+
+---
+
 # MichiMetronome 1.9.1 — sub-buffer pitch analysis
 
 ## Root cause found by 1.9.0 telemetry

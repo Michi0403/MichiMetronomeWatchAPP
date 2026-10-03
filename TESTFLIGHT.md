@@ -48,3 +48,9 @@ After upload processing:
 
 Open the public TestFlight link on the iPhone paired with his Apple Watch.
 Accept the beta in TestFlight, then install the Watch-only app.
+
+## Build 2 (tester feedback pass)
+
+The source package includes a shared root `MichiMetronome` scheme for archiving.
+Archive the root scheme for App Store Connect/TestFlight. The Watch target remains
+watchOS 26.0; the packaging wrapper now targets iOS 15.0. Build number is 2.

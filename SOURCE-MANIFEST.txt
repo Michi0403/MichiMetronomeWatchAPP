@@ -14,7 +14,9 @@ MichiMetronome/MichiMetronome Watch App/MichiMetronomeApp.swift
 MichiMetronome/MichiMetronome Watch App/PrivacyInfo.xcprivacy
 MichiMetronome/MichiMetronome.xcodeproj/project.pbxproj
 MichiMetronome/MichiMetronome.xcodeproj/project.xcworkspace/contents.xcworkspacedata
+MichiMetronome/MichiMetronome.xcodeproj/xcshareddata/xcschemes/MichiMetronome.xcscheme
 MichiMetronome/MichiMetronomeWatch-Info.plist
+PATCH-NOTES-1.10.0.md
 PATCH-NOTES-1.3.0.md
 PATCH-NOTES-1.3.1.md
 PATCH-NOTES-1.4.0.md

@@ -39,6 +39,30 @@ enum ClickTone: String, Codable, CaseIterable, Hashable, Identifiable, Sendable 
     }
 }
 
+enum AccentTone: String, Codable, CaseIterable, Hashable, Identifiable, Sendable {
+    case harmonic
+    case octave
+    case bell
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .harmonic: "Harmonic"
+        case .octave: "Octave"
+        case .bell: "Bell"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .harmonic: "bright harmonic downbeat"
+        case .octave: "one octave above the beat"
+        case .bell: "short bell-like accent"
+        }
+    }
+}
+
 enum TimeSignature: String, Codable, CaseIterable, Hashable, Identifiable, Sendable {
     case twoTwo
     case twoFour
@@ -131,16 +155,117 @@ enum TimeSignature: String, Codable, CaseIterable, Hashable, Identifiable, Senda
     }
 }
 
+enum RhythmPreset: String, Codable, CaseIterable, Hashable, Identifiable, Sendable {
+    case plain
+    case rock
+    case hipHop
+    case classical
+    case waltz
+    case sixEight
+    case custom
+
+    var id: String { rawValue }
+
+    static var selectableCases: [RhythmPreset] {
+        allCases.filter { $0 != .custom }
+    }
+
+    var title: String {
+        switch self {
+        case .plain: "Plain"
+        case .rock: "Rock"
+        case .hipHop: "Hip-Hop"
+        case .classical: "Classical"
+        case .waltz: "Waltz"
+        case .sixEight: "6/8 Pulse"
+        case .custom: "Custom"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .plain:
+            "classic downbeat + steady base"
+        case .rock:
+            "strong 1 & 3, alternating fifth"
+        case .hipHop:
+            "heavy downbeat with a wider 4th beat"
+        case .classical:
+            "simple tonic–fifth–octave contour"
+        case .waltz:
+            "3/4 strong first beat"
+        case .sixEight:
+            "two grouped pulses in 6/8"
+        case .custom:
+            "edited beat accents / notes"
+        }
+    }
+
+    var timeSignature: TimeSignature {
+        switch self {
+        case .waltz:
+            .threeFour
+        case .sixEight:
+            .sixEight
+        default:
+            .fourFour
+        }
+    }
+
+    var accentPattern: [Bool] {
+        switch self {
+        case .plain:
+            [true, false, false, false]
+        case .rock:
+            [true, false, true, false]
+        case .hipHop:
+            [true, false, false, true]
+        case .classical:
+            [true, false, false, false]
+        case .waltz:
+            [true, false, false]
+        case .sixEight:
+            [true, false, false, true, false, false]
+        case .custom:
+            []
+        }
+    }
+
+    /// Optional semitone offsets from the configured base note.
+    /// nil = use the base note unchanged.
+    var noteOffsets: [Int?] {
+        switch self {
+        case .plain:
+            [nil, nil, nil, nil]
+        case .rock:
+            [nil, 7, nil, 7]
+        case .hipHop:
+            [nil, 7, nil, 10]
+        case .classical:
+            [nil, 7, 12, 7]
+        case .waltz:
+            [nil, 7, 7]
+        case .sixEight:
+            [nil, nil, nil, 7, nil, nil]
+        case .custom:
+            []
+        }
+    }
+}
+
 struct MetronomeSettings: Codable, Equatable, Sendable {
-    static let minimumBPM = 30.0
-    static let maximumBPM = 300.0
-    static let minimumManualInterval = 0.06
-    static let maximumManualInterval = 4.0
+    nonisolated static let minimumBPM = 30.0
+    nonisolated static let maximumBPM = 300.0
+    nonisolated static let minimumManualInterval = 0.06
+    nonisolated static let maximumManualInterval = 4.0
+
+    // Watch-speaker-friendly range. This avoids base notes that technically
+    // exist as MIDI but are not useful / clearly audible on the Watch.
+    nonisolated static let minimumBaseMidiNote = 48   // C3
+    nonisolated static let maximumBaseMidiNote = 84   // C6
 
     // Safety ceiling only, not a musical limitation.
-    // At the minimum 60 ms event spacing this still permits >8 minutes of
-    // continuous events; at ordinary musical tempos it permits much longer.
-    static let maximumManualEvents = 8_192
+    nonisolated static let maximumManualEvents = 8_192
 
     var bpm: Double = 120
     var timeSignature: TimeSignature = .fourFour
@@ -148,7 +273,16 @@ struct MetronomeSettings: Codable, Equatable, Sendable {
     var audioEnabled: Bool = true
     var accentDownbeat: Bool = true
     var clickTone: ClickTone = .wood
+    var accentTone: AccentTone = .harmonic
     var baseMidiNote: Int = 69
+    var rhythmPreset: RhythmPreset = .plain
+
+    /// One accent flag per BPM beat. Beat 0 mirrors accentDownbeat.
+    var bpmBeatAccents: [Bool] = []
+
+    /// Optional semitone offset from baseMidiNote per BPM beat.
+    var bpmBeatNoteOffsets: [Int?] = []
+
     var mode: MetronomeMode = .bpm
     var manualIntervals: [Double] = []
 
@@ -168,7 +302,67 @@ struct MetronomeSettings: Codable, Equatable, Sendable {
             Self.maximumBPM
         )
 
-        baseMidiNote = min(max(baseMidiNote, 0), 127)
+        baseMidiNote = min(
+            max(
+                baseMidiNote,
+                Self.minimumBaseMidiNote
+            ),
+            Self.maximumBaseMidiNote
+        )
+
+        let beatCount = max(beatsPerBar, 1)
+
+        bpmBeatAccents = Array(
+            bpmBeatAccents.prefix(beatCount)
+        )
+
+        if bpmBeatAccents.count < beatCount {
+            bpmBeatAccents.append(
+                contentsOf: Array(
+                    repeating: false,
+                    count: beatCount - bpmBeatAccents.count
+                )
+            )
+        }
+
+        if bpmBeatAccents.isEmpty {
+            bpmBeatAccents = Array(
+                repeating: false,
+                count: beatCount
+            )
+        }
+
+        bpmBeatAccents[0] = accentDownbeat
+
+        bpmBeatNoteOffsets = Array(
+            bpmBeatNoteOffsets.prefix(beatCount)
+        )
+
+        if bpmBeatNoteOffsets.count < beatCount {
+            bpmBeatNoteOffsets.append(
+                contentsOf: Array(
+                    repeating: nil,
+                    count: beatCount - bpmBeatNoteOffsets.count
+                )
+            )
+        }
+
+        bpmBeatNoteOffsets = bpmBeatNoteOffsets.map { offset in
+            guard let offset else {
+                return nil
+            }
+
+            let requested = baseMidiNote + offset
+            let clamped = min(
+                max(
+                    requested,
+                    Self.minimumBaseMidiNote
+                ),
+                Self.maximumBaseMidiNote
+            )
+
+            return clamped - baseMidiNote
+        }
 
         manualIntervals = Array(
             manualIntervals
@@ -212,10 +406,25 @@ struct MetronomeSettings: Codable, Equatable, Sendable {
 }
 
 enum SettingsStore {
-    private static let key = "MichiMetronome.Settings.v6"
+    private static let key = "MichiMetronome.Settings.v7"
+    private static let legacyV6Key = "MichiMetronome.Settings.v6"
     private static let legacyV5Key = "MichiMetronome.Settings.v5"
     private static let legacyV4Key = "MichiMetronome.Settings.v4"
     private static let legacyV3Key = "MichiMetronome.Settings.v3"
+
+    private struct V6Settings: Codable {
+        var bpm: Double = 120
+        var timeSignature: TimeSignature = .fourFour
+        var hapticsEnabled: Bool = true
+        var audioEnabled: Bool = true
+        var accentDownbeat: Bool = true
+        var clickTone: ClickTone = .wood
+        var baseMidiNote: Int = 69
+        var mode: MetronomeMode = .bpm
+        var manualIntervals: [Double] = []
+        var manualMidiNotes: [Int?] = []
+        var statusNotificationsEnabled: Bool = false
+    }
 
     private struct V5Settings: Codable {
         var bpm: Double = 120
@@ -271,6 +480,39 @@ enum SettingsStore {
 
         if
             let data = UserDefaults.standard.data(
+                forKey: legacyV6Key
+            ),
+            let old = try? JSONDecoder().decode(
+                V6Settings.self,
+                from: data
+            )
+        {
+            var migrated = MetronomeSettings(
+                bpm: old.bpm,
+                timeSignature: old.timeSignature,
+                hapticsEnabled: old.hapticsEnabled,
+                audioEnabled: old.audioEnabled,
+                accentDownbeat: old.accentDownbeat,
+                clickTone: old.clickTone,
+                accentTone: .harmonic,
+                baseMidiNote: old.baseMidiNote,
+                rhythmPreset: .plain,
+                bpmBeatAccents: [],
+                bpmBeatNoteOffsets: [],
+                mode: old.mode,
+                manualIntervals: old.manualIntervals,
+                manualMidiNotes: old.manualMidiNotes,
+                statusNotificationsEnabled:
+                    old.statusNotificationsEnabled
+            )
+
+            migrated.normalize()
+            save(migrated)
+            return migrated
+        }
+
+        if
+            let data = UserDefaults.standard.data(
                 forKey: legacyV5Key
             ),
             let old = try? JSONDecoder().decode(
@@ -285,7 +527,11 @@ enum SettingsStore {
                 audioEnabled: old.audioEnabled,
                 accentDownbeat: old.accentDownbeat,
                 clickTone: old.clickTone,
+                accentTone: .harmonic,
                 baseMidiNote: 69,
+                rhythmPreset: .plain,
+                bpmBeatAccents: [],
+                bpmBeatNoteOffsets: [],
                 mode: old.mode,
                 manualIntervals: old.manualIntervals,
                 manualMidiNotes: old.manualMidiNotes,
@@ -314,7 +560,11 @@ enum SettingsStore {
                 audioEnabled: old.audioEnabled,
                 accentDownbeat: old.accentDownbeat,
                 clickTone: old.clickTone,
+                accentTone: .harmonic,
                 baseMidiNote: 69,
+                rhythmPreset: .plain,
+                bpmBeatAccents: [],
+                bpmBeatNoteOffsets: [],
                 mode: old.mode,
                 manualIntervals: old.manualIntervals,
                 manualMidiNotes: Array(
@@ -354,6 +604,16 @@ enum SettingsStore {
                     old.accentDownbeat,
                 clickTone:
                     old.clickTone,
+                accentTone:
+                    .harmonic,
+                baseMidiNote:
+                    69,
+                rhythmPreset:
+                    .plain,
+                bpmBeatAccents:
+                    [],
+                bpmBeatNoteOffsets:
+                    [],
                 mode:
                     old.mode,
                 manualIntervals:
@@ -372,7 +632,9 @@ enum SettingsStore {
             return migrated
         }
 
-        return MetronomeSettings()
+        var fresh = MetronomeSettings()
+        fresh.normalize()
+        return fresh
     }
 
     static func save(

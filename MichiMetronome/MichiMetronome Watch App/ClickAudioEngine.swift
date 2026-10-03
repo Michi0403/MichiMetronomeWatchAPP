@@ -4,6 +4,7 @@ import Foundation
 actor ClickAudioEngine {
     private struct BufferKey: Hashable {
         let tone: ClickTone
+        let accentTone: AccentTone
         let midiNote: Int
         let accent: Bool
         let frameCount: Int
@@ -102,12 +103,25 @@ actor ClickAudioEngine {
     func scheduleNote(
         accent: Bool,
         tone: ClickTone,
+        accentTone: AccentTone,
         midiNote: Int,
         duration: TimeInterval,
         hostTime: UInt64
     ) {
-        guard prepared, engine.isRunning else {
+        guard prepared else {
             return
+        }
+
+        // watchOS may stop the render graph after a route / power transition.
+        // Recover in-place instead of silently dropping every future beat.
+        if !engine.isRunning {
+            do {
+                engine.prepare()
+                try engine.start()
+            } catch {
+                prepared = false
+                return
+            }
         }
 
         let note = min(max(midiNote, 0), 127)
@@ -119,6 +133,7 @@ actor ClickAudioEngine {
 
         let key = BufferKey(
             tone: tone,
+            accentTone: accentTone,
             midiNote: note,
             accent: accent,
             frameCount: frameCount
@@ -133,6 +148,7 @@ actor ClickAudioEngine {
                 let generated = Self.makeNoteBuffer(
                     format: sourceFormat,
                     tone: tone,
+                    accentTone: accentTone,
                     midiNote: note,
                     accent: accent,
                     frameCount: frameCount
@@ -178,6 +194,7 @@ actor ClickAudioEngine {
 
         let key = BufferKey(
             tone: tone,
+            accentTone: .harmonic,
             midiNote: note,
             accent: false,
             frameCount: frameCount
@@ -192,8 +209,56 @@ actor ClickAudioEngine {
                 let generated = Self.makeNoteBuffer(
                     format: sourceFormat,
                     tone: tone,
+                    accentTone: .harmonic,
                     midiNote: note,
                     accent: false,
+                    frameCount: frameCount
+                )
+            else {
+                return
+            }
+
+            bufferCache[key] = generated
+            buffer = generated
+        }
+
+        enqueuePreviewBuffer(buffer)
+    }
+
+    func previewAccent(
+        tone: ClickTone,
+        accentTone: AccentTone,
+        midiNote: Int
+    ) async {
+        guard await prepareSession(tone: tone) else {
+            return
+        }
+
+        let note = min(max(midiNote, 0), 127)
+        let frameCount = Int(
+            sourceFormat.sampleRate * 0.18
+        )
+
+        let key = BufferKey(
+            tone: tone,
+            accentTone: accentTone,
+            midiNote: note,
+            accent: true,
+            frameCount: frameCount
+        )
+
+        let buffer: AVAudioPCMBuffer
+
+        if let cached = bufferCache[key] {
+            buffer = cached
+        } else {
+            guard
+                let generated = Self.makeNoteBuffer(
+                    format: sourceFormat,
+                    tone: tone,
+                    accentTone: accentTone,
+                    midiNote: note,
+                    accent: true,
                     frameCount: frameCount
                 )
             else {
@@ -266,6 +331,7 @@ actor ClickAudioEngine {
     private static func makeNoteBuffer(
         format: AVAudioFormat,
         tone: ClickTone,
+        accentTone: AccentTone,
         midiNote: Int,
         accent: Bool,
         frameCount: Int
@@ -282,15 +348,23 @@ actor ClickAudioEngine {
 
         buffer.frameLength = AVAudioFrameCount(frameCount)
 
+        let effectiveMidiNote: Int
+
+        if accent, accentTone == .octave {
+            effectiveMidiNote = min(midiNote + 12, 127)
+        } else {
+            effectiveMidiNote = midiNote
+        }
+
         let frequency =
             440.0
             * pow(
                 2.0,
-                Double(midiNote - 69) / 12.0
+                Double(effectiveMidiNote - 69) / 12.0
             )
 
-        let amplitude = accent ? 0.80 : 0.63
-        let attackSeconds = 0.004
+        let amplitude = accent ? 0.92 : 0.63
+        let attackSeconds = accent ? 0.0025 : 0.004
 
         for frame in 0..<frameCount {
             let time =
@@ -303,8 +377,14 @@ actor ClickAudioEngine {
             let attack =
                 min(1.0, time / attackSeconds)
 
-            let releasePower =
-                tone == .beep ? 1.5 : 2.8
+            let releasePower: Double
+
+            if accent, accentTone == .bell {
+                releasePower = 1.25
+            } else {
+                releasePower =
+                    tone == .beep ? 1.5 : 2.8
+            }
 
             let release =
                 pow(
@@ -322,35 +402,65 @@ actor ClickAudioEngine {
 
             let harmonicSample: Double
 
-            switch tone {
-            case .wood:
-                harmonicSample =
-                    sin(phase) * 0.74
-                    + sin(phase * 2.01) * 0.18
-                    + sin(phase * 3.97) * 0.08
+            if accent {
+                // Accent timbre is deliberately independent from the regular
+                // click tone, so switching Wood/Sharp/Low/Beep can never make
+                // the downbeat disappear.
+                switch accentTone {
+                case .harmonic:
+                    harmonicSample =
+                        sin(phase) * 0.52
+                        + sin(phase * 2.0) * 0.26
+                        + sin(phase * 3.0) * 0.14
+                        + sin(phase * 5.0) * 0.08
 
-            case .sharp:
-                harmonicSample =
-                    sin(phase) * 0.55
-                    + sin(phase * 2.0) * 0.28
-                    + sin(phase * 4.0) * 0.17
+                case .octave:
+                    harmonicSample =
+                        sin(phase) * 0.70
+                        + sin(phase * 2.0) * 0.20
+                        + sin(phase * 4.0) * 0.10
 
-            case .low:
-                harmonicSample =
-                    sin(phase) * 0.84
-                    + sin(phase * 2.0) * 0.16
+                case .bell:
+                    harmonicSample =
+                        sin(phase) * 0.54
+                        + sin(phase * 2.01) * 0.24
+                        + sin(phase * 3.97) * 0.14
+                        + sin(phase * 6.11) * 0.08
+                }
+            } else {
+                switch tone {
+                case .wood:
+                    harmonicSample =
+                        sin(phase) * 0.74
+                        + sin(phase * 2.01) * 0.18
+                        + sin(phase * 3.97) * 0.08
 
-            case .beep:
-                harmonicSample = sin(phase)
+                case .sharp:
+                    harmonicSample =
+                        sin(phase) * 0.55
+                        + sin(phase * 2.0) * 0.28
+                        + sin(phase * 4.0) * 0.17
+
+                case .low:
+                    harmonicSample =
+                        sin(phase) * 0.84
+                        + sin(phase * 2.0) * 0.16
+
+                case .beep:
+                    harmonicSample = sin(phase)
+                }
             }
 
             let transient: Double
 
             if frame < 10 {
+                let transientLevel =
+                    accent ? 0.20 : 0.12
+
                 transient =
                     frame.isMultiple(of: 2)
-                    ? 0.12
-                    : -0.12
+                    ? transientLevel
+                    : -transientLevel
             } else {
                 transient = 0
             }

@@ -226,53 +226,53 @@ struct ContentView: View {
         Button {
             engine.toggle()
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 if engine.isPreparing {
                     ProgressView()
-                        .controlSize(.mini)
+                        .controlSize(.small)
                 } else if engine.isRunning {
                     RoundedRectangle(
                         cornerRadius: 2
                     )
                     .frame(
-                        width: 12,
-                        height: 12
+                        width: 15,
+                        height: 15
                     )
                 } else {
                     PlayTriangle()
                         .frame(
-                            width: 13,
-                            height: 14
+                            width: 16,
+                            height: 18
                         )
                 }
 
                 Text(
                     engine.isRunning
-                    ? "Stop"
-                    : "Start"
+                    ? "STOP"
+                    : "START"
                 )
             }
             .font(
                 .system(
-                    size: 16,
-                    weight: .bold
+                    size: 18,
+                    weight: .heavy
                 )
             )
             .frame(
                 maxWidth: .infinity,
-                minHeight: 38,
-                maxHeight: 38
+                minHeight: 50,
+                maxHeight: 50
             )
             .contentShape(
                 RoundedRectangle(
-                    cornerRadius: 14
+                    cornerRadius: 16
                 )
             )
         }
         .buttonStyle(.plain)
         .background(
             RoundedRectangle(
-                cornerRadius: 14
+                cornerRadius: 16
             )
             .fill(
                 engine.isRunning
@@ -280,7 +280,20 @@ struct ContentView: View {
                 : Color.green
             )
         )
-        .foregroundStyle(.black)
+        .overlay {
+            RoundedRectangle(
+                cornerRadius: 16
+            )
+            .stroke(
+                Color.white.opacity(0.22),
+                lineWidth: 1.5
+            )
+        }
+        .foregroundStyle(
+            engine.isRunning
+            ? Color.white
+            : Color.black
+        )
         .opacity(
             engine.isPreparing
             || (
@@ -297,7 +310,13 @@ struct ContentView: View {
                 && !engine.canStart
             )
         )
+        .accessibilityLabel(
+            engine.isRunning
+            ? "Stop metronome"
+            : "Start metronome"
+        )
     }
+
 }
 
 private struct BPMPanel: View {
@@ -305,6 +324,7 @@ private struct BPMPanel: View {
         MetronomeEngine
 
     @Binding var showTempoEditor: Bool
+    @State private var showRhythmPresets = false
 
     var body: some View {
         VStack(spacing: 6) {
@@ -327,13 +347,13 @@ private struct BPMPanel: View {
                     Text(
                         "BPM • \(engine.baseNoteName) • tap for crown"
                     )
-                        .font(
-                            .system(
-                                size: 9,
-                                weight: .semibold
-                            )
+                    .font(
+                        .system(
+                            size: 9,
+                            weight: .semibold
                         )
-                        .foregroundStyle(.green)
+                    )
+                    .foregroundStyle(.green)
                 }
                 .frame(
                     maxWidth: .infinity,
@@ -359,7 +379,45 @@ private struct BPMPanel: View {
 
             BPMBeatStrip()
 
+            Button {
+                showRhythmPresets = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(
+                        systemName:
+                            "music.quarternote.3"
+                    )
+                    Text("Rhythm")
+                    Spacer()
+                    Text(
+                        engine.settings
+                            .rhythmPreset.title
+                    )
+                    .foregroundStyle(
+                        .secondary
+                    )
+                }
+                .font(
+                    .system(
+                        size: 11,
+                        weight: .semibold
+                    )
+                )
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: 34
+                )
+            }
+            .buttonStyle(.bordered)
+
             TempoStepGrid()
+        }
+        .sheet(
+            isPresented:
+                $showRhythmPresets
+        ) {
+            RhythmPresetView()
+                .environmentObject(engine)
         }
     }
 }
@@ -446,135 +504,526 @@ private struct TempoCrownView: View {
     @Environment(\.dismiss)
     private var dismiss
 
-    @State private var crownBPM = 120.0
+    @State private var draftBPM = 120.0
     @FocusState private var crownFocused: Bool
 
     var body: some View {
-        VStack(spacing: 9) {
-            Text("Tempo")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(spacing: 9) {
+                Text("Tempo")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-            VStack(spacing: -2) {
-                Text(
-                    "\(Int(engine.settings.bpm))"
-                )
-                .font(
-                    .system(
-                        size: 48,
-                        weight: .bold,
-                        design: .rounded
+                VStack(spacing: -2) {
+                    Text(
+                        "\(Int(draftBPM.rounded()))"
                     )
-                )
-                .monospacedDigit()
-
-                Text("BPM • turn crown")
                     .font(
-                        .caption2.weight(.semibold)
+                        .system(
+                            size: 48,
+                            weight: .bold,
+                            design: .rounded
+                        )
                     )
-                    .foregroundStyle(.green)
-            }
-            .frame(maxWidth: .infinity)
-            .focusable()
-            .focused($crownFocused)
-            .digitalCrownRotation(
-                $crownBPM,
-                from:
-                    MetronomeSettings.minimumBPM,
-                through:
-                    MetronomeSettings.maximumBPM,
-                by: 1,
-                sensitivity: .medium,
-                isContinuous: false,
-                isHapticFeedbackEnabled: false
-            )
-            .onChange(
-                of: crownBPM
-            ) { _, value in
-                engine.setBPM(value)
-            }
-            .onChange(
-                of: engine.settings.bpm
-            ) { _, value in
-                if crownBPM != value {
-                    crownBPM = value
+                    .monospacedDigit()
+
+                    Text("BPM • turn crown")
+                        .font(
+                            .caption2
+                            .weight(.semibold)
+                        )
+                        .foregroundStyle(.green)
                 }
-            }
-            .task {
-                crownBPM =
-                    engine.settings.bpm
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: 70
+                )
+                .focusable()
+                .focused($crownFocused)
+                .digitalCrownRotation(
+                    $draftBPM,
+                    from:
+                        MetronomeSettings.minimumBPM,
+                    through:
+                        MetronomeSettings.maximumBPM,
+                    by: 1,
+                    sensitivity: .medium,
+                    isContinuous: false,
+                    isHapticFeedbackEnabled: false
+                )
 
-                // Wait until SwiftUI has attached this modal view before
-                // assigning Crown focus.
-                await Task.yield()
-                crownFocused = true
-            }
-            .onDisappear {
-                crownFocused = false
-            }
+                HStack(spacing: 6) {
+                    draftStep("-5", -5)
+                    draftStep("+5", 5)
+                }
 
-            TempoStepGrid()
+                HStack(spacing: 6) {
+                    draftStep("-1", -1)
+                    draftStep("+1", 1)
+                }
 
-            Button("Done") {
-                dismiss()
+                HStack(spacing: 6) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: 44
+                    )
+
+                    Button("Save") {
+                        engine.setBPM(
+                            draftBPM
+                        )
+                        dismiss()
+                    }
+                    .buttonStyle(
+                        .borderedProminent
+                    )
+                    .tint(.green)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: 44
+                    )
+                }
+
+                Text(
+                    "Closing with × discards changes."
+                )
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.green)
+            .padding(.horizontal, 8)
         }
-        .padding(.horizontal, 8)
+        .task {
+            draftBPM =
+                engine.settings.bpm
+
+            await Task.yield()
+            crownFocused = true
+        }
+        .onDisappear {
+            crownFocused = false
+        }
+    }
+
+    @ViewBuilder
+    private func draftStep(
+        _ title: String,
+        _ delta: Int
+    ) -> some View {
+        Button(title) {
+            draftBPM =
+                min(
+                    max(
+                        draftBPM
+                            + Double(delta),
+                        MetronomeSettings
+                            .minimumBPM
+                    ),
+                    MetronomeSettings
+                        .maximumBPM
+                )
+        }
+        .font(
+            .system(
+                size: 15,
+                weight: .bold
+            )
+            .monospacedDigit()
+        )
+        .buttonStyle(.bordered)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: 44
+        )
     }
 }
+
 
 private struct BPMBeatStrip: View {
     @EnvironmentObject private var engine:
         MetronomeEngine
 
-    private var compact: Bool {
-        engine.settings.beatsPerBar > 8
-    }
+    @State private var showBeatEditor = false
+    @State private var editingBeat = 0
 
     var body: some View {
-        HStack(
-            spacing: compact ? 2 : 3
+        ScrollView(
+            .horizontal,
+            showsIndicators: false
         ) {
-            ForEach(
-                0..<engine.settings
-                    .beatsPerBar,
-                id: \.self
-            ) { beat in
-                Circle()
-                    .fill(
-                        active(beat)
-                        ? Color.green
-                        : Color.secondary
-                            .opacity(0.28)
-                    )
-                    .frame(
-                        width:
-                            active(beat)
-                            ? (compact ? 6 : 8)
-                            : (compact ? 4 : 5),
-                        height:
-                            active(beat)
-                            ? (compact ? 6 : 8)
-                            : (compact ? 4 : 5)
-                    )
+            HStack(spacing: 4) {
+                ForEach(
+                    0..<engine.settings
+                        .beatsPerBar,
+                    id: \.self
+                ) { beat in
+                    beatCell(beat)
+                        .onLongPressGesture(
+                            minimumDuration: 0.42
+                        ) {
+                            editingBeat = beat
+                            showBeatEditor = true
+                        }
+                }
             }
+            .padding(.horizontal, 2)
         }
         .frame(
             maxWidth: .infinity,
-            minHeight: 10
+            minHeight: 38
         )
+        .sheet(
+            isPresented:
+                $showBeatEditor
+        ) {
+            BPMBeatEditorView(
+                beatIndex:
+                    editingBeat
+            )
+            .environmentObject(engine)
+        }
     }
 
-    private func active(
+    private func beatCell(
         _ beat: Int
-    ) -> Bool {
-        guard engine.isRunning else {
-            return false
-        }
+    ) -> some View {
+        let active =
+            engine.isRunning
+            && beat == engine.beatIndex
 
-        return beat == engine.beatIndex
+        let accented =
+            engine.isBPMBeatAccented(
+                beat
+            )
+
+        return VStack(spacing: 1) {
+            Circle()
+                .fill(
+                    active
+                    ? Color.green
+                    : (
+                        accented
+                        ? Color.orange
+                        : Color.secondary
+                            .opacity(0.35)
+                    )
+                )
+                .frame(
+                    width: active ? 9 : 7,
+                    height: active ? 9 : 7
+                )
+
+            Text(
+                engine.bpmBeatNoteName(
+                    at: beat
+                )
+            )
+            .font(
+                .system(
+                    size: 8,
+                    weight:
+                        accented
+                        ? .bold
+                        : .medium,
+                    design: .rounded
+                )
+                .monospaced()
+            )
+            .foregroundStyle(
+                accented
+                ? .orange
+                : .secondary
+            )
+            .lineLimit(1)
+        }
+        .frame(
+            width: 34
+        )
+        .frame(
+            minHeight: 32
+        )
+        .background(
+            RoundedRectangle(
+                cornerRadius: 8
+            )
+            .fill(
+                active
+                ? Color.green.opacity(0.10)
+                : Color.white.opacity(0.035)
+            )
+        )
+        .contentShape(
+            RoundedRectangle(
+                cornerRadius: 8
+            )
+        )
+        .accessibilityLabel(
+            "Beat \(beat + 1), \(engine.bpmBeatNoteName(at: beat))\(accented ? ", accented" : "")"
+        )
+        .accessibilityHint(
+            "Long press to edit"
+        )
+    }
+}
+
+private struct BPMBeatEditorView: View {
+    @EnvironmentObject private var engine:
+        MetronomeEngine
+
+    @Environment(\.dismiss)
+    private var dismiss
+
+    let beatIndex: Int
+
+    @State private var draftAccent = false
+    @State private var draftNote = 69.0
+    @State private var useBaseNote = true
+    @FocusState private var crownFocused: Bool
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 8) {
+                Text("Beat \(beatIndex + 1)")
+                    .font(.headline)
+
+                Toggle(
+                    "Accent",
+                    isOn: $draftAccent
+                )
+
+                Toggle(
+                    "Use base note",
+                    isOn: $useBaseNote
+                )
+
+                VStack(spacing: -1) {
+                    Text(
+                        useBaseNote
+                        ? engine.baseNoteName
+                        : noteName(
+                            Int(
+                                draftNote
+                                    .rounded()
+                            )
+                        )
+                    )
+                    .font(
+                        .system(
+                            size: 38,
+                            weight: .bold,
+                            design: .rounded
+                        )
+                        .monospaced()
+                    )
+
+                    Text(
+                        useBaseNote
+                        ? "Base note"
+                        : "Turn crown to override"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(
+                        .secondary
+                    )
+                }
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: 60
+                )
+                .focusable(
+                    !useBaseNote
+                )
+                .focused(
+                    $crownFocused
+                )
+                .digitalCrownRotation(
+                    $draftNote,
+                    from:
+                        Double(
+                            MetronomeSettings
+                                .minimumBaseMidiNote
+                        ),
+                    through:
+                        Double(
+                            MetronomeSettings
+                                .maximumBaseMidiNote
+                        ),
+                    by: 1,
+                    sensitivity: .medium,
+                    isContinuous: false,
+                    isHapticFeedbackEnabled:
+                        false
+                )
+                .onChange(
+                    of: draftNote
+                ) { _, _ in
+                    if crownFocused {
+                        useBaseNote = false
+                    }
+                }
+
+                HStack(spacing: 6) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: 44
+                    )
+
+                    Button("Save") {
+                        engine.setBPMBeat(
+                            beatIndex,
+                            accent:
+                                draftAccent,
+                            midiNoteOverride:
+                                useBaseNote
+                                ? nil
+                                : Int(
+                                    draftNote
+                                        .rounded()
+                                )
+                        )
+                        dismiss()
+                    }
+                    .buttonStyle(
+                        .borderedProminent
+                    )
+                    .tint(.green)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: 44
+                    )
+                }
+            }
+            .padding(.horizontal, 7)
+        }
+        .task {
+            draftAccent =
+                engine.isBPMBeatAccented(
+                    beatIndex
+                )
+
+            if let note =
+                engine.bpmBeatOverrideMidiNote(
+                    at: beatIndex
+                )
+            {
+                useBaseNote = false
+                draftNote =
+                    Double(note)
+            } else {
+                useBaseNote = true
+                draftNote =
+                    Double(
+                        engine.settings
+                            .baseMidiNote
+                    )
+            }
+
+            await Task.yield()
+            crownFocused =
+                !useBaseNote
+        }
+        .onChange(
+            of: useBaseNote
+        ) { _, value in
+            crownFocused = !value
+        }
+        .onDisappear {
+            crownFocused = false
+        }
+    }
+
+    private func noteName(
+        _ midiNote: Int
+    ) -> String {
+        let names = [
+            "C", "C♯", "D", "D♯",
+            "E", "F", "F♯", "G",
+            "G♯", "A", "A♯", "B"
+        ]
+
+        let clamped =
+            min(max(midiNote, 0), 127)
+
+        return
+            "\(names[clamped % 12])\(clamped / 12 - 1)"
+    }
+}
+
+private struct RhythmPresetView: View {
+    @EnvironmentObject private var engine:
+        MetronomeEngine
+
+    @Environment(\.dismiss)
+    private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(
+                    RhythmPreset
+                        .selectableCases
+                ) { preset in
+                    Button {
+                        engine
+                            .applyRhythmPreset(
+                                preset
+                            )
+                        dismiss()
+                    } label: {
+                        VStack(
+                            alignment: .leading,
+                            spacing: 2
+                        ) {
+                            HStack {
+                                Text(preset.title)
+                                    .font(
+                                        .body
+                                        .weight(
+                                            .semibold
+                                        )
+                                    )
+
+                                Spacer()
+
+                                if
+                                    engine.settings
+                                        .rhythmPreset
+                                        == preset
+                                {
+                                    Image(
+                                        systemName:
+                                            "checkmark.circle.fill"
+                                    )
+                                    .foregroundStyle(
+                                        .green
+                                    )
+                                }
+                            }
+
+                            Text(
+                                preset.subtitle
+                            )
+                            .font(.caption2)
+                            .foregroundStyle(
+                                .secondary
+                            )
+                        }
+                        .frame(
+                            minHeight: 44
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .navigationTitle("Rhythm")
+        }
     }
 }
 
@@ -1097,36 +1546,6 @@ private struct SettingsView: View {
             List {
                 Section("Output") {
                     Toggle(
-                        "Haptics",
-                        isOn: Binding(
-                            get: {
-                                engine.settings
-                                    .hapticsEnabled
-                            },
-                            set: {
-                                engine
-                                    .setHapticsEnabled($0)
-                            }
-                        )
-                    )
-
-                    Button {
-                        engine.previewHaptic()
-                    } label: {
-                        Label(
-                            "Test haptic",
-                            systemImage:
-                                "waveform.path"
-                        )
-                    }
-
-                    Text(
-                        "Haptic strength is controlled by watchOS. WatchKit's metronome-safe click API exposes the haptic type, but no app-level intensity value."
-                    )
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                    Toggle(
                         "Sound",
                         isOn: Binding(
                             get: {
@@ -1140,8 +1559,22 @@ private struct SettingsView: View {
                         )
                     )
 
+                    Toggle(
+                        "Haptics",
+                        isOn: Binding(
+                            get: {
+                                engine.settings
+                                    .hapticsEnabled
+                            },
+                            set: {
+                                engine
+                                    .setHapticsEnabled($0)
+                            }
+                        )
+                    )
+
                     Picker(
-                        "Click tone",
+                        "Beat sound",
                         selection: Binding(
                             get: {
                                 engine.settings
@@ -1159,6 +1592,51 @@ private struct SettingsView: View {
                             Text(tone.title)
                                 .tag(tone)
                         }
+                    }
+
+                    Toggle(
+                        "Accent first beat",
+                        isOn: Binding(
+                            get: {
+                                engine.settings
+                                    .accentDownbeat
+                            },
+                            set: {
+                                engine
+                                    .setAccentDownbeat($0)
+                            }
+                        )
+                    )
+
+                    Picker(
+                        "Accent sound",
+                        selection: Binding(
+                            get: {
+                                engine.settings
+                                    .accentTone
+                            },
+                            set: {
+                                engine
+                                    .setAccentTone($0)
+                            }
+                        )
+                    ) {
+                        ForEach(
+                            AccentTone.allCases
+                        ) { tone in
+                            Text(tone.title)
+                                .tag(tone)
+                        }
+                    }
+
+                    Button {
+                        engine.previewAccent()
+                    } label: {
+                        Label(
+                            "Preview accent",
+                            systemImage:
+                                "speaker.wave.2.fill"
+                        )
                     }
 
                     Button {
@@ -1185,36 +1663,6 @@ private struct SettingsView: View {
                             )
                         }
                     }
-
-                    Button {
-                        engine.previewClick()
-                    } label: {
-                        Label(
-                            "Preview click",
-                            systemImage:
-                                "speaker.wave.2.fill"
-                        )
-                    }
-
-                    Toggle(
-                        "Accent first beat",
-                        isOn: Binding(
-                            get: {
-                                engine.settings
-                                    .accentDownbeat
-                            },
-                            set: {
-                                engine
-                                    .setAccentDownbeat($0)
-                            }
-                        )
-                    )
-
-                    Text(
-                        "Haptic clicks are isolated from the UI. If watchOS takes too long starting the Taptic Engine, that haptic is dropped instead of freezing or delaying the metronome."
-                    )
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
                 }
 
                 Section("Tools") {
@@ -1227,23 +1675,9 @@ private struct SettingsView: View {
                                 "tuningfork"
                         )
                     }
-
-                    Text(
-                        "The tuner and Mic rhythm recorder analyze the Watch microphone locally. Raw audio is not saved or uploaded."
-                    )
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
                 }
 
-                if let warning = engine.outputWarning {
-                    Section("Output status") {
-                        Text(warning)
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
-                }
-
-                Section("Status") {
+                Section("App") {
                     Toggle(
                         "Notify when leaving",
                         isOn: Binding(
@@ -1261,20 +1695,16 @@ private struct SettingsView: View {
                     )
                 }
 
-                Section("Background") {
-                    Text(
-                        "Sound can continue in the background. Ordinary WatchKit haptics are only available while the app is active."
-                    )
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                }
-
-                Section("Offline") {
-                    Text(
-                        "No network, account, cloud sync, or phone app."
-                    )
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                if let warning =
+                    engine.outputWarning
+                {
+                    Section("Output status") {
+                        Text(warning)
+                            .font(.caption2)
+                            .foregroundStyle(
+                                .orange
+                            )
+                    }
                 }
             }
             .navigationTitle("Settings")
@@ -1508,7 +1938,7 @@ private struct BaseNoteView: View {
                     )
 
                 Text(
-                    "MIDI \(engine.settings.baseMidiNote)"
+                    "MIDI \(engine.settings.baseMidiNote) • C3–C6"
                 )
                 .font(
                     .caption2
@@ -1524,8 +1954,16 @@ private struct BaseNoteView: View {
             .focused($crownFocused)
             .digitalCrownRotation(
                 $crownNote,
-                from: 24,
-                through: 96,
+                from:
+                    Double(
+                        MetronomeSettings
+                            .minimumBaseMidiNote
+                    ),
+                through:
+                    Double(
+                        MetronomeSettings
+                            .maximumBaseMidiNote
+                    ),
                 by: 1,
                 sensitivity: .medium,
                 isContinuous: false,

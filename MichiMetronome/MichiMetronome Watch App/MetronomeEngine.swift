@@ -1593,10 +1593,13 @@ private nonisolated struct PlaybackPlan: Sendable {
     let manualIntervals: [Double]
     let manualMidiNotes: [Int?]
     let baseMidiNote: Int
+    let bpmBeatAccents: [Bool]
+    let bpmBeatNoteOffsets: [Int?]
     let accentDownbeat: Bool
     let audioEnabled: Bool
     let hapticsEnabled: Bool
     let clickTone: ClickTone
+    let accentTone: AccentTone
 
     func step(
         for eventIndex: Int
@@ -1621,8 +1624,29 @@ private nonisolated struct PlaybackPlan: Sendable {
     func accent(
         for eventIndex: Int
     ) -> Bool {
-        accentDownbeat
-            && step(for: eventIndex) == 0
+        let currentStep =
+            step(for: eventIndex)
+
+        switch mode {
+        case .bpm:
+            if
+                currentStep >= 0,
+                currentStep < bpmBeatAccents.count
+            {
+                return bpmBeatAccents[
+                    currentStep
+                ]
+            }
+
+            return
+                accentDownbeat
+                && currentStep == 0
+
+        case .manual:
+            return
+                accentDownbeat
+                && currentStep == 0
+        }
     }
 
     func recordedMidiNote(
@@ -1650,9 +1674,40 @@ private nonisolated struct PlaybackPlan: Sendable {
     func playbackMidiNote(
         for eventIndex: Int
     ) -> Int {
-        recordedMidiNote(
-            for: eventIndex
-        ) ?? baseMidiNote
+        switch mode {
+        case .bpm:
+            let currentStep =
+                step(for: eventIndex)
+
+            if
+                currentStep >= 0,
+                currentStep
+                    < bpmBeatNoteOffsets.count,
+                let offset =
+                    bpmBeatNoteOffsets[
+                        currentStep
+                    ]
+            {
+                return min(
+                    max(
+                        baseMidiNote + offset,
+                        MetronomeSettings
+                            .minimumBaseMidiNote
+                    ),
+                    MetronomeSettings
+                        .maximumBaseMidiNote
+                )
+            }
+
+            return baseMidiNote
+
+        case .manual:
+            return
+                recordedMidiNote(
+                    for: eventIndex
+                )
+                ?? baseMidiNote
+        }
     }
 
     func noteDuration(
@@ -1889,6 +1944,8 @@ final class MetronomeEngine: ObservableObject {
         MicrophoneEventStore()
 
     private var resumeAfterForeground = false
+    private var lastTunerDisplayTimestamp =
+        -Double.infinity
 
     private let audio = ClickAudioEngine()
     private let haptics = HapticOutput()
@@ -1974,6 +2031,91 @@ final class MetronomeEngine: ObservableObject {
         Self.noteName(
             midiNote: settings.baseMidiNote
         )
+    }
+
+    func bpmBeatMidiNote(
+        at beat: Int
+    ) -> Int {
+        guard
+            beat >= 0,
+            beat < settings.beatsPerBar
+        else {
+            return settings.baseMidiNote
+        }
+
+        guard
+            beat < settings
+                .bpmBeatNoteOffsets.count,
+            let offset =
+                settings
+                    .bpmBeatNoteOffsets[
+                        beat
+                    ]
+        else {
+            return settings.baseMidiNote
+        }
+
+        return min(
+            max(
+                settings.baseMidiNote
+                    + offset,
+                MetronomeSettings
+                    .minimumBaseMidiNote
+            ),
+            MetronomeSettings
+                .maximumBaseMidiNote
+        )
+    }
+
+    func bpmBeatNoteName(
+        at beat: Int
+    ) -> String {
+        Self.noteName(
+            midiNote:
+                bpmBeatMidiNote(
+                    at: beat
+                )
+        )
+    }
+
+    func bpmBeatOverrideMidiNote(
+        at beat: Int
+    ) -> Int? {
+        guard
+            beat >= 0,
+            beat
+                < settings
+                    .bpmBeatNoteOffsets.count,
+            settings
+                .bpmBeatNoteOffsets[
+                    beat
+                ] != nil
+        else {
+            return nil
+        }
+
+        return bpmBeatMidiNote(
+            at: beat
+        )
+    }
+
+    func isBPMBeatAccented(
+        _ beat: Int
+    ) -> Bool {
+        guard
+            beat >= 0,
+            beat < settings
+                .bpmBeatAccents.count
+        else {
+            return
+                beat == 0
+                && settings.accentDownbeat
+        }
+
+        return settings
+            .bpmBeatAccents[
+                beat
+            ]
     }
 
     var currentPlaybackNoteName: String? {
@@ -2155,13 +2297,19 @@ final class MetronomeEngine: ObservableObject {
                     requestedSettings.manualMidiNotes,
                 baseMidiNote:
                     requestedSettings.baseMidiNote,
+                bpmBeatAccents:
+                    requestedSettings.bpmBeatAccents,
+                bpmBeatNoteOffsets:
+                    requestedSettings.bpmBeatNoteOffsets,
                 accentDownbeat:
                     requestedSettings.accentDownbeat,
                 audioEnabled: effectiveAudio,
                 hapticsEnabled:
                     requestedSettings.hapticsEnabled,
                 clickTone:
-                    requestedSettings.clickTone
+                    requestedSettings.clickTone,
+                accentTone:
+                    requestedSettings.accentTone
             )
 
             self.beatIndex = 0
@@ -2246,6 +2394,8 @@ final class MetronomeEngine: ObservableObject {
         updateSettings { value in
             value.timeSignature =
                 timeSignature
+            value.rhythmPreset =
+                .custom
         }
 
         if isRunning {
@@ -2283,7 +2433,15 @@ final class MetronomeEngine: ObservableObject {
     func setBaseMidiNote(
         _ midiNote: Int
     ) {
-        let note = min(max(midiNote, 0), 127)
+        let note = min(
+            max(
+                midiNote,
+                MetronomeSettings
+                    .minimumBaseMidiNote
+            ),
+            MetronomeSettings
+                .maximumBaseMidiNote
+        )
 
         guard settings.baseMidiNote != note else {
             return
@@ -2309,6 +2467,156 @@ final class MetronomeEngine: ObservableObject {
     func setAccentDownbeat(_ enabled: Bool) {
         updateSettings { value in
             value.accentDownbeat = enabled
+
+            if value.bpmBeatAccents.isEmpty {
+                value.bpmBeatAccents =
+                    Array(
+                        repeating: false,
+                        count:
+                            max(
+                                value.beatsPerBar,
+                                1
+                            )
+                    )
+            }
+
+            value.bpmBeatAccents[0] =
+                enabled
+            value.rhythmPreset =
+                .custom
+        }
+
+        if isRunning {
+            rescheduleActivePlayback()
+        }
+    }
+
+    func setAccentTone(
+        _ tone: AccentTone
+    ) {
+        guard settings.accentTone != tone else {
+            return
+        }
+
+        updateSettings { value in
+            value.accentTone = tone
+        }
+
+        if isRunning {
+            rescheduleActivePlayback()
+        }
+    }
+
+    func setBPMBeat(
+        _ beat: Int,
+        accent: Bool,
+        midiNoteOverride: Int?
+    ) {
+        guard
+            beat >= 0,
+            beat < settings.beatsPerBar
+        else {
+            return
+        }
+
+        updateSettings { value in
+            let count =
+                max(
+                    value.beatsPerBar,
+                    1
+                )
+
+            if value.bpmBeatAccents.count < count {
+                value.bpmBeatAccents.append(
+                    contentsOf: Array(
+                        repeating: false,
+                        count:
+                            count
+                            - value
+                                .bpmBeatAccents
+                                .count
+                    )
+                )
+            }
+
+            if value.bpmBeatNoteOffsets.count < count {
+                value.bpmBeatNoteOffsets.append(
+                    contentsOf: Array(
+                        repeating: nil,
+                        count:
+                            count
+                            - value
+                                .bpmBeatNoteOffsets
+                                .count
+                    )
+                )
+            }
+
+            value.bpmBeatAccents[beat] =
+                accent
+
+            if beat == 0 {
+                value.accentDownbeat =
+                    accent
+            }
+
+            if let midiNoteOverride {
+                let note =
+                    min(
+                        max(
+                            midiNoteOverride,
+                            MetronomeSettings
+                                .minimumBaseMidiNote
+                        ),
+                        MetronomeSettings
+                            .maximumBaseMidiNote
+                    )
+
+                value.bpmBeatNoteOffsets[
+                    beat
+                ] =
+                    note
+                    - value.baseMidiNote
+            } else {
+                value.bpmBeatNoteOffsets[
+                    beat
+                ] = nil
+            }
+
+            value.rhythmPreset =
+                .custom
+        }
+
+        if isRunning {
+            rescheduleActivePlayback()
+        }
+    }
+
+    func applyRhythmPreset(
+        _ preset: RhythmPreset
+    ) {
+        guard preset != .custom else {
+            return
+        }
+
+        updateSettings { value in
+            value.mode = .bpm
+            value.timeSignature =
+                preset.timeSignature
+            value.rhythmPreset =
+                preset
+            value.bpmBeatAccents =
+                preset.accentPattern
+            value.accentDownbeat =
+                preset.accentPattern
+                    .first
+                    ?? true
+            value.bpmBeatNoteOffsets =
+                preset.noteOffsets
+
+            // A pronounced harmonic accent is the safe preset default.
+            value.accentTone =
+                .harmonic
         }
 
         if isRunning {
@@ -2342,6 +2650,28 @@ final class MetronomeEngine: ObservableObject {
 
         if settings.hapticsEnabled,
            WKApplication.shared().applicationState == .active {
+            haptics.requestClick()
+        }
+    }
+
+    func previewAccent() {
+        let tone = settings.clickTone
+        let accentTone =
+            settings.accentTone
+
+        Task {
+            await audio.previewAccent(
+                tone: tone,
+                accentTone: accentTone,
+                midiNote:
+                    settings.baseMidiNote
+            )
+        }
+
+        if settings.hapticsEnabled,
+           WKApplication.shared().applicationState
+                == .active
+        {
             haptics.requestClick()
         }
     }
@@ -2618,6 +2948,8 @@ final class MetronomeEngine: ObservableObject {
         isPreparingMicrophone = true
         isTunerActive = true
         microphoneError = nil
+        lastTunerDisplayTimestamp =
+            -Double.infinity
         clearDetectedPitch()
 
         let owner = self
@@ -2689,6 +3021,8 @@ final class MetronomeEngine: ObservableObject {
         _ frame: MicrophoneFrame,
         recordingPattern: Bool
     ) {
+        // Keep the level meter responsive, but intentionally slow the tuner
+        // text itself so a human can read it instead of watching 16 Hz jitter.
         microphoneLevel =
             min(
                 1,
@@ -2697,6 +3031,23 @@ final class MetronomeEngine: ObservableObject {
                     frame.rms * 14.0
                 )
             )
+
+        if !recordingPattern {
+            let interval =
+                frame.timestamp
+                - lastTunerDisplayTimestamp
+
+            guard
+                interval >= 0.24
+                || lastTunerDisplayTimestamp
+                    == -Double.infinity
+            else {
+                return
+            }
+
+            lastTunerDisplayTimestamp =
+                frame.timestamp
+        }
 
         if
             frame.confidence >= 0.50,
@@ -2721,9 +3072,6 @@ final class MetronomeEngine: ObservableObject {
 
         // Recording events are committed by MicrophoneAnalyzer on its serial
         // analysis queue before this visual frame reaches MainActor.
-        // `recordingPattern` remains explicit to document which UI mode owns
-        // these frames, but the UI is no longer the recorder.
-        _ = recordingPattern
     }
 
     private func commitMicrophonePattern() {
@@ -2899,6 +3247,10 @@ final class MetronomeEngine: ObservableObject {
                 currentSettings.manualMidiNotes,
             baseMidiNote:
                 currentSettings.baseMidiNote,
+            bpmBeatAccents:
+                currentSettings.bpmBeatAccents,
+            bpmBeatNoteOffsets:
+                currentSettings.bpmBeatNoteOffsets,
             accentDownbeat:
                 currentSettings.accentDownbeat,
             audioEnabled:
@@ -2906,7 +3258,9 @@ final class MetronomeEngine: ObservableObject {
             hapticsEnabled:
                 currentSettings.hapticsEnabled,
             clickTone:
-                currentSettings.clickTone
+                currentSettings.clickTone,
+            accentTone:
+                currentSettings.accentTone
         )
 
         beatIndex = 0
@@ -2967,7 +3321,10 @@ final class MetronomeEngine: ObservableObject {
             var audioEventIndex = 0
             var liveEventIndex = 0
 
-            let horizonSeconds = 8.0
+            // Keep the Watch audio queue shallow. Two seconds is ample
+            // scheduling runway without continuously feeding a large buffer
+            // backlog to AVAudioPlayerNode.
+            let horizonSeconds = 2.0
             let lateToleranceSeconds = 0.050
 
             while !Task.isCancelled {
@@ -3016,6 +3373,8 @@ final class MetronomeEngine: ObservableObject {
                                         ),
                                     tone:
                                         plan.clickTone,
+                                    accentTone:
+                                        plan.accentTone,
                                     midiNote:
                                         plan.playbackMidiNote(
                                             for:
@@ -3146,15 +3505,15 @@ final class MetronomeEngine: ObservableObject {
                         for: liveEventIndex
                     )
 
-                let recordedNote =
-                    plan.recordedMidiNote(
+                let playbackNote =
+                    plan.playbackMidiNote(
                         for: liveEventIndex
                     )
 
                 await self?.publishBeat(
                     step: currentStep,
-                    recordedMidiNote:
-                        recordedNote,
+                    playbackMidiNote:
+                        playbackNote,
                     generation:
                         expectedGeneration
                 )
@@ -3166,7 +3525,7 @@ final class MetronomeEngine: ObservableObject {
 
     private func publishBeat(
         step: Int,
-        recordedMidiNote: Int?,
+        playbackMidiNote: Int,
         generation expectedGeneration: UInt64
     ) {
         guard
@@ -3178,7 +3537,7 @@ final class MetronomeEngine: ObservableObject {
 
         beatIndex = step
         currentPlaybackMidiNote =
-            recordedMidiNote
+            playbackMidiNote
         lastBeatDate = Date()
     }
 

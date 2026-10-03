@@ -230,3 +230,15 @@ and average/maximum analysis time.
 Delivered AVAudioEngine tap buffers are internally split into 1024-sample pitch
 analysis hops. Pitch-event resolution no longer depends on the hardware callback
 buffer size. UI pitch updates are throttled independently.
+
+
+## First tester feedback pass (1.10.0 / TestFlight build 2)
+
+- Larger Start/Stop control.
+- Tempo sheet saves only when Save is pressed.
+- Dedicated configurable harmonic accent path.
+- Shallower/self-healing audio scheduling.
+- Compact Settings.
+- Slower tuner display updates.
+- Base note limited to C3–C6.
+- BPM rhythm presets plus long-press per-beat accent/note editing.
